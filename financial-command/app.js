@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  const current = document.currentScript;
   const restore = document.getElementById("restoreBackupSetup");
   if (!restore) {
     const setup = document.getElementById("setup");
@@ -23,6 +22,24 @@
       document.body.appendChild(input);
     }
   }
+
+  const RAW_FEED = "https://raw.githubusercontent.com/zander123abc/nn-zero-to-hero/financial-command-feed/financial-command/latest.enc.json";
+  const LOCAL_FEED = "/nn-zero-to-hero/financial-command/latest.enc.json";
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    try {
+      const url = typeof input === "string" ? input : input?.url;
+      if (url === RAW_FEED || (typeof url === "string" && url.startsWith(RAW_FEED + "?"))) {
+        return nativeFetch(`${LOCAL_FEED}?v=${Date.now()}`, {
+          ...(init || {}),
+          cache: "no-store",
+          credentials: "same-origin",
+          referrerPolicy: "no-referrer"
+        });
+      }
+    } catch (_) {}
+    return nativeFetch(input, init);
+  };
 
   const stamp = Date.now();
   const css = document.querySelector('link[rel="stylesheet"]');
