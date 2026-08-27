@@ -1,0 +1,7 @@
+const VERSION="2026.08.27.1";
+const CACHE=`fc-pages-${VERSION}`;
+const SHELL=["./","./index.html","./version.json","./manifest.webmanifest","./icon.svg"];
+self.addEventListener("install",event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);for(const url of SHELL){const response=await fetch(url,{cache:"reload"});if(response.ok)await cache.put(url,response)}})());self.skipWaiting()});
+self.addEventListener("activate",event=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith("fc-pages-")&&k!==CACHE).map(k=>caches.delete(k)));await self.clients.claim()})())});
+self.addEventListener("message",event=>{if(event.data?.type==="SKIP_WAITING")self.skipWaiting()});
+self.addEventListener("fetch",event=>{const url=new URL(event.request.url);if(url.origin!==self.location.origin)return;if(event.request.mode==="navigate"){event.respondWith((async()=>{try{const fresh=await fetch(event.request,{cache:"no-store"});if(fresh.ok){const cache=await caches.open(CACHE);cache.put("./index.html",fresh.clone())}return fresh}catch{return(await caches.match("./index.html"))||Response.error()}})());return}event.respondWith((async()=>{try{const fresh=await fetch(event.request,{cache:"no-cache"});if(fresh.ok){const cache=await caches.open(CACHE);cache.put(event.request,fresh.clone())}return fresh}catch{return(await caches.match(event.request))||Response.error()}})())});
