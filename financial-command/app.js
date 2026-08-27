@@ -1,55 +1,167 @@
 (() => {
   "use strict";
-  const restore = document.getElementById("restoreBackupSetup");
-  if (!restore) {
-    const setup = document.getElementById("setup");
-    if (setup) {
-      const label = document.createElement("label");
-      label.className = "file-button";
-      label.textContent = "Restore encrypted backup";
-      const input = document.createElement("input");
-      input.id = "restoreBackupSetup";
-      input.type = "file";
-      input.accept = "application/json,.json";
-      label.appendChild(input);
-      const form = document.getElementById("setupForm");
-      if (form) form.appendChild(label); else setup.appendChild(label);
-    } else {
-      const input = document.createElement("input");
-      input.id = "restoreBackupSetup";
-      input.type = "file";
-      input.hidden = true;
-      document.body.appendChild(input);
+  const STORE = "fc_auto_v2", SCHEMA = "1.0", ITER = 250000;
+  const FEED = "./latest.enc.json";
+  const $ = id => document.getElementById(id), $$ = sel => [...document.querySelectorAll(sel)];
+  const TE = new TextEncoder(), TD = new TextDecoder();
+  let key = null, vault = null, syncTimer = null, currentTrend = "assets";
+  const TITLES = {overview:"Overview",cashflow:"Cashflow",portfolio:"Portfolio",learn:"Learn",settings:"Settings"};
+
+  const show = el => el.classList.remove("hidden"), hide = el => el.classList.add("hidden");
+  function b64(a){let s="";for(const b of new Uint8Array(a))s+=String.fromCharCode(b);return btoa(s)}
+  function ub(s){
+    if(typeof s!=="string")throw Error("Encrypted feed field is not a string.");
+    let t=s.trim().replace(/\s+/g,"").replace(/-/g,"+").replace(/_/g,"/");
+    while(t.length%4)t+="=";
+    try{const r=atob(t),a=new Uint8Array(r.length);for(let i=0;i<r.length;i++)a[i]=r.charCodeAt(i);return a}catch(e){throw Error("Encrypted feed contains invalid Base64 data.")}
+  }
+  function b64u(a){return b64(a).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"")}
+  async function derive(p,s,it=ITER){const m=await crypto.subtle.importKey("raw",TE.encode(p),"PBKDF2",false,["deriveKey"]);return crypto.subtle.deriveKey({name:"PBKDF2",salt:s,iterations:it,hash:"SHA-256"},m,{name:"AES-GCM",length:256},false,["encrypt","decrypt"])}
+  async function encrypt(k,o){const iv=crypto.getRandomValues(new Uint8Array(12)),c=await crypto.subtle.encrypt({name:"AES-GCM",iv},k,TE.encode(JSON.stringify(o)));return{iv:b64(iv),c:b64(c)}}
+  async function decrypt(k,r){return JSON.parse(TD.decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:ub(r.iv)},k,ub(r.c))))}
+  function record(){try{return JSON.parse(localStorage.getItem(STORE)||"null")}catch{return null}}
+  function normalizeVault(){vault.snaps=Array.isArray(vault.snaps)?vault.snaps:[];vault.reads=vault.reads&&typeof vault.reads==="object"?vault.reads:{};vault.ui=vault.ui&&typeof vault.ui==="object"?vault.ui:{};}
+  async function save(){const r=record();if(!r)throw Error("Vault metadata missing.");const e=await encrypt(key,vault);localStorage.setItem(STORE,JSON.stringify({v:2,it:r.it||ITER,s:r.s,iv:e.iv,c:e.c,t:new Date().toISOString()}))}
+  async function create(p){const s=crypto.getRandomValues(new Uint8Array(16));key=await derive(p,s);vault={snaps:[],reads:{},ui:{tab:"overview"}};const e=await encrypt(key,vault);localStorage.setItem(STORE,JSON.stringify({v:2,it:ITER,s:b64(s),iv:e.iv,c:e.c,t:new Date().toISOString()}))}
+  async function openVault(p){const r=record();if(!r)throw Error("No vault found.");key=await derive(p,ub(r.s),r.it||ITER);vault=await decrypt(key,r);normalizeVault()}
+  function lock(){key=vault=null;if(syncTimer)clearInterval(syncTimer);hide($("app"));hide($("tabBar"));hide($("lock"));show($("unlock"));$("up").value="";setHeaderSync("Local","")}
+
+  function num(v){return typeof v==="number"&&Number.isFinite(v)?v:null}
+  function money(v,compact=false){if(num(v)===null)return"—";return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:compact&&Math.abs(v)>=100000?1:0,notation:compact&&Math.abs(v)>=100000?"compact":"standard"}).format(v)}
+  function pct(v,d=1){return num(v)!==null?`${v.toFixed(d)}%`:"—"}
+  function dateShort(s){if(!s)return"—";const d=new Date(s+(/[TZ]/.test(s)?"":"T12:00:00"));return Number.isFinite(d.getTime())?d.toLocaleDateString(undefined,{month:"short",day:"numeric"}):s}
+  function latest(){return vault?.snaps?.length?[...vault.snaps].sort((a,b)=>new Date(b.generated_at)-new Date(a.generated_at))[0]:null}
+  function previous(){const a=[...(vault?.snaps||[])].sort((a,b)=>new Date(b.generated_at)-new Date(a.generated_at));return a[1]||null}
+  function valid(s){if(!s||typeof s!=="object"||s.schema_version!==SCHEMA)throw Error("Expected schema_version 1.0.");if(!Number.isFinite(new Date(s.generated_at).getTime()))throw Error("Invalid generated_at.");if(!["GREEN","YELLOW","RED"].includes(s.status))throw Error("Invalid status.");for(const k of["data_quality","metrics","retirement","portfolio","spending","actions","summary"])if(!s[k]||typeof s[k]!=="object")throw Error(`Missing ${k}.`);if(!Array.isArray(s.readings)||!Array.isArray(s.spending.observations))throw Error("Invalid readings or observations.");return s}
+  function extract(t){t=(t||"").trim();if(t.startsWith("{"))return t;const x=t.match(/APP_SYNC_JSON[\s\S]*?```(?:json)?\s*([\s\S]*?)```/i)||t.match(/```(?:json)?\s*([\s\S]*?)```/i);if(x)return x[1].trim();const a=t.indexOf("{"),b=t.lastIndexOf("}");if(a>=0&&b>a)return t.slice(a,b+1);throw Error("Could not find JSON.")}
+  async function importSnap(s){valid(s);if(new Date(s.generated_at).getTime()>Date.now()+21600000)throw Error("Report timestamp is too far in the future.");const i=vault.snaps.findIndex(x=>x.generated_at===s.generated_at);i>=0?vault.snaps[i]=s:vault.snaps.push(s);vault.snaps.sort((a,b)=>new Date(a.generated_at)-new Date(b.generated_at));if(vault.snaps.length>365)vault.snaps=vault.snaps.slice(-365);await save();render();return s}
+
+  function setHeaderSync(label,state){$("headerSync").className=`sync-indicator ${state||""}`;$("headerSync").querySelector(".sync-label").textContent=label}
+  function setTab(name,persist=true){if(!TITLES[name])name="overview";$$('.tab-view').forEach(v=>v.classList.toggle('active',v.dataset.view===name));$$('.tab-button').forEach(b=>{const on=b.dataset.tab===name;b.classList.toggle('active',on);on?b.setAttribute('aria-current','page'):b.removeAttribute('aria-current')});$("pageTitle").textContent=TITLES[name];window.scrollTo({top:0,behavior:"auto"});if(vault&&persist){vault.ui.tab=name;save().catch(()=>{})}if(name==="overview")renderTrend();}
+  $$('.tab-button').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.tab)));
+
+  function qualityChip(text,cls=""){const el=document.createElement('span');el.className=`quality-chip ${cls}`;el.textContent=text;$("qualityFlags").appendChild(el)}
+  function freshness(s){if(!s)return{text:"No report yet",cls:""};const h=(Date.now()-new Date(s.generated_at))/36e5;if(h<0)return{text:"Clock mismatch",cls:"bad"};if(h<=36)return{text:`Fresh · ${Math.floor(h)}h`,cls:"good"};if(h<=72)return{text:`Aging · ${Math.floor(h)}h`,cls:"warn"};return{text:`Stale · ${Math.floor(h/24)}d`,cls:"bad"}}
+  function renderStatus(s){$("statusText").textContent=s?.status||"NO DATA";$("statusDot").className=`status-dot ${s?.status||""}`;$("reportDate").textContent=s?.report_date?dateShort(s.report_date):"—";const fr=freshness(s);$("freshness").textContent=fr.text;$("bottomLine").textContent=s?.summary?.bottom_line||"Automatic encrypted sync is available after pairing.";$("qualityFlags").textContent="";if(!s)return;const q=s.data_quality||{};qualityChip(`Transactions ${q.transactions_state||"unknown"}${q.transactions_complete?" ✓":""}`,q.transactions_complete?"good":"warn");qualityChip(`Recurring ${q.recurring_state||"unknown"}${q.recurring_complete?" ✓":""}`,q.recurring_complete?"good":"warn");if(q.manual_data_stale)qualityChip("Manual data stale","bad");else if(q.manual_data_as_of)qualityChip(`Manual ${dateShort(q.manual_data_as_of)}`,'warn');}
+  function renderMetrics(s){const m=s?.metrics||{},pr=previous()?.metrics||{};$("knownAssets").textContent=money(m.known_financial_assets,true);$("investedAssets").textContent=money(m.invested_assets,true);$("liquidCash").textContent=money(m.liquid_cash,true);const d=num(m.known_financial_assets)!==null&&num(pr.known_financial_assets)!==null?m.known_financial_assets-pr.known_financial_assets:null;$("assetDelta").textContent=d===null?"latest snapshot":`${d>=0?"+":""}${money(d)} vs prior`;const obligations=num(m.near_term_obligations),cash=num(m.liquid_cash);$("cashCoverage").textContent=cash!==null&&obligations!==null&&obligations>0?`${(cash/obligations).toFixed(1)}× obligations`:"available liquidity";}
+  function renderActions(s){$("highestAction").textContent=s?.actions?.highest_value_action||"—";$("coreAction").textContent=s?.actions?.core_action||"—";$("specAction").textContent=s?.actions?.speculative_action||"—";}
+  function renderLiquidity(s){const m=s?.metrics||{},ef=num(m.emergency_fund_balance),target=num(m.emergency_fund_target),ratio=ef!==null&&target&&target>0?Math.max(0,Math.min(1,ef/target)):0;$("efText").textContent=`${money(ef)} / ${money(target)}`;$("efPct").textContent=ef!==null&&target?`${Math.round(ratio*100)}%`:"—";$("efRing").style.strokeDashoffset=String(314.159*(1-ratio));$("availableCash").textContent=money(m.immediately_available_cash);$("obligations").textContent=money(m.near_term_obligations);const gate=$("liquidityGate");gate.className="pill";if(ef===null){gate.textContent="Unknown"}else if(ef>=3000){gate.textContent="Risk-on gate clear";gate.classList.add('good')}else{gate.textContent="Build liquidity";gate.classList.add('warn')}}
+
+  function sortedHistory(){return [...(vault?.snaps||[])].sort((a,b)=>new Date(a.generated_at)-new Date(b.generated_at))}
+  function renderTrend(){const arr=sortedHistory().slice(-12),field=currentTrend==="cash"?"liquid_cash":"known_financial_assets",vals=arr.map(s=>num(s.metrics?.[field])).filter(v=>v!==null),svg=$("trendChart");svg.textContent="";$$('#trendControl .segment').forEach(b=>b.classList.toggle('active',b.dataset.trend===currentTrend));if(!arr.length||!vals.length){$("trendValue").textContent="—";$("trendChange").textContent="No history";$("trendDates").innerHTML="<span>—</span><span>—</span>";return}const points=arr.map((s,i)=>({v:num(s.metrics?.[field]),i,date:s.report_date})).filter(x=>x.v!==null),min=Math.min(...points.map(x=>x.v)),max=Math.max(...points.map(x=>x.v)),range=max-min||Math.max(1,max*.02),w=600,h=190,pad=8;const coords=points.map((x,j)=>({x:points.length===1?w/2:pad+j*(w-2*pad)/(points.length-1),y:pad+(max-x.v)*(h-2*pad)/range,v:x.v}));const ns="http://www.w3.org/2000/svg";const base=document.createElementNS(ns,'line');base.setAttribute('x1','0');base.setAttribute('x2','600');base.setAttribute('y1','186');base.setAttribute('y2','186');base.setAttribute('stroke','var(--line)');base.setAttribute('vector-effect','non-scaling-stroke');svg.appendChild(base);if(coords.length>1){const area=document.createElementNS(ns,'path'),line=document.createElementNS(ns,'path');const d=coords.map((p,i)=>`${i?'L':'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');area.setAttribute('d',`${d} L${coords.at(-1).x},186 L${coords[0].x},186 Z`);area.setAttribute('fill','var(--accent-soft)');line.setAttribute('d',d);line.setAttribute('fill','none');line.setAttribute('stroke','var(--accent)');line.setAttribute('stroke-width','2.3');line.setAttribute('vector-effect','non-scaling-stroke');line.setAttribute('stroke-linecap','round');line.setAttribute('stroke-linejoin','round');svg.append(area,line)}coords.forEach((p,i)=>{const c=document.createElementNS(ns,'circle');c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r',i===coords.length-1?'4':'2.4');c.setAttribute('fill','var(--surface)');c.setAttribute('stroke','var(--accent)');c.setAttribute('stroke-width','2');c.setAttribute('vector-effect','non-scaling-stroke');svg.appendChild(c)});const last=points.at(-1).v,first=points[0].v,chg=last-first;$("trendValue").textContent=money(last);$("trendChange").textContent=points.length>1?`${chg>=0?"+":""}${money(chg)} across ${points.length} snapshots`:"1 snapshot";$("trendDates").innerHTML=`<span>${dateShort(points[0].date)}</span><span>${dateShort(points.at(-1).date)}</span>`}
+  $$('#trendControl .segment').forEach(b=>b.addEventListener('click',()=>{currentTrend=b.dataset.trend;renderTrend()}));
+
+  function escapeText(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+  function renderSpend(s){const sp=s?.spending||{},m=s?.metrics||{};$("spendMtd").textContent=money(sp.mtd_reconciled);$("spendRaw").textContent=money(sp.mtd_raw_linked);$("spendAvg").textContent=money(sp.three_month_reconciled_average);$("marketplace").textContent=money(sp.marketplace_mtd);$("revolving").textContent=money(m.revolving_card_balance);$("highestApr").textContent=pct(m.highest_purchase_apr,2);$("obligations2").textContent=money(m.near_term_obligations);const vals=[{label:"Reconciled",v:num(sp.mtd_reconciled),cls:""},{label:"3-mo average",v:num(sp.three_month_reconciled_average),cls:"avg"},{label:"Marketplace",v:num(sp.marketplace_mtd),cls:"market"}],max=Math.max(1,...vals.map(x=>x.v||0));$("spendBars").textContent="";vals.forEach(x=>{const row=document.createElement('div');row.className='comp-row';row.innerHTML=`<span>${x.label}</span><div class="comp-track"><div class="comp-fill ${x.cls}"></div></div><strong>${money(x.v)}</strong>`;row.querySelector('.comp-fill').style.width=`${(x.v||0)/max*100}%`;$("spendBars").appendChild(row)});const obs=sp.observations||[];$("spendObservations").textContent="";obs.slice(0,3).forEach(o=>{const v=["HEALTHY","WATCH","CHANGE"].includes(o?.verdict)?o.verdict:"WATCH",el=document.createElement('article');el.className=`signal ${v}`;el.innerHTML=`<span class="signal-mark"></span><div><strong>${escapeText(o?.title||"Observation")}</strong><p>${escapeText(o?.detail||"")}</p></div>`;$("spendObservations").appendChild(el)});if(!obs.length)$("spendObservations").innerHTML='<div class="signal WATCH"><span class="signal-mark"></span><div><strong>No behavior flags</strong><p>The latest report did not include a material spending observation.</p></div></div>';const verdict=$("spendVerdict"),v=obs.find(o=>o.verdict==='CHANGE')?'CHANGE':obs.find(o=>o.verdict==='WATCH')?'WATCH':obs.length?'HEALTHY':'—';verdict.textContent=v;verdict.className='pill '+(v==='CHANGE'?'bad':v==='WATCH'?'warn':v==='HEALTHY'?'good':'')}
+  function renderPortfolio(s){const p=s?.portfolio||{},m=s?.metrics||{},items=[['U.S. equity',num(p.us_equity_pct),'var(--accent)'],['International',num(p.international_equity_pct),'var(--cyan)'],['Crypto',num(p.crypto_pct),'var(--purple)']].filter(x=>x[1]!==null);let used=items.reduce((a,x)=>a+x[1],0);if(used<99.9)items.push(['Other / cash',Math.max(0,100-used),'var(--surface-3)']);let cursor=0,stops=[];for(const [,v,c] of items){stops.push(`${c} ${cursor}% ${cursor+v}%`);cursor+=v}$("portfolioDonut").style.background=`conic-gradient(${stops.join(',')})`;$("portfolioTotal").textContent=money(m.invested_assets,true);$("portfolioLegend").textContent="";items.forEach(([label,v,c])=>{const r=document.createElement('div');r.className='legend-row';r.innerHTML=`<span class="legend-swatch"></span><span>${label}</span><strong>${pct(v)}</strong>`;r.querySelector('.legend-swatch').style.background=c;$("portfolioLegend").appendChild(r)});const risks=[['Speculative sleeve',num(p.speculative_sleeve_pct),15,'risk'],['Crypto',num(p.crypto_pct),10,'risk'],['QQQM',num(p.qqqm_pct),30,''],['Leveraged ETF',num(p.leveraged_etf_pct),2,'warn']];$("riskBars").textContent="";risks.forEach(([label,v,max,cls])=>{const r=document.createElement('div');r.className='risk-row';r.innerHTML=`<div class="risk-top"><span>${label}</span><strong>${pct(v)}</strong></div><div class="risk-track"><div class="risk-fill ${cls}"></div></div>`;r.querySelector('.risk-fill').style.width=`${v===null?0:Math.min(100,v/max*100)}%`;$("riskBars").appendChild(r)});const sb=$("specBadge"),sv=num(p.speculative_sleeve_pct);sb.textContent=sv===null?'Spec unknown':`${pct(sv)} speculative`;sb.className='pill '+(sv!==null&&sv>15?'bad':sv!==null&&sv>10?'warn':sv!==null?'good':'')}
+  function setMini(id,v,max){const el=$(id);el.style.width=num(v)!==null&&num(max)!==null&&max>0?`${Math.min(100,Math.max(0,v/max*100))}%`:'0%'}
+  function renderRetirement(s){const r=s?.retirement||{};$("tspBalance").textContent=money(r.tsp_balance);$("rothTspPct").textContent=pct(r.roth_tsp_contribution_percent,0);$("tspProgressText").textContent=`${money(r.tsp_ytd_employee_contributions)} / ${money(r.tsp_annual_limit)}`;$("iraProgressText").textContent=`${money(r.ira_ytd_contributions)} / ${money(r.ira_annual_limit)}`;setMini('tspBar',r.tsp_ytd_employee_contributions,r.tsp_annual_limit);setMini('iraBar',r.ira_ytd_contributions,r.ira_annual_limit);const mix=r.tsp_target_mix||{};$("tspMix").textContent=['C','S','I','F','G'].filter(k=>num(mix[k])!==null).map(k=>`${k} ${mix[k]}%`).join(' · ')||'—'}
+  function safeHttps(u){try{const x=new URL(u);return x.protocol==='https:'?x.href:null}catch{return null}}
+  async function toggleRead(k,on){vault.reads[k]=on;await save();renderReading(latest()?.readings||[])}
+  function renderReading(items){const list=$("readingList");list.textContent="";let done=0;const arr=Array.isArray(items)?items.slice(0,8):[];arr.forEach((r,i)=>{const url=safeHttps(r?.url),k=url||`${r?.source||''}|${r?.title||i}`,checked=!!vault?.reads?.[k];if(checked)done++;const card=document.createElement('article');card.className='reading-card';const main=document.createElement('div');main.className='reading-main';const cb=document.createElement('input');cb.type='checkbox';cb.className='reading-check';cb.checked=checked;cb.setAttribute('aria-label',`Mark ${r?.title||'reading'} complete`);cb.addEventListener('change',()=>toggleRead(k,cb.checked));const body=document.createElement('div');body.innerHTML=`<h3>${escapeText(r?.title||'Reading')}</h3><p>${escapeText(r?.why||'')}</p><div class="reading-meta"><span>${escapeText(r?.source||'Source')}</span><span>•</span><span>${escapeText(r?.difficulty||'—')}</span>${num(r?.minutes)!==null?`<span>•</span><span>~${r.minutes} min</span>`:''}</div>`;main.append(cb,body);card.appendChild(main);if(url){const a=document.createElement('a');a.className='reading-link';a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.referrerPolicy='no-referrer';a.innerHTML='<span>Open source</span><span>↗</span>';card.appendChild(a)}list.appendChild(card)});if(!arr.length)list.innerHTML='<div class="signal WATCH"><span class="signal-mark"></span><div><strong>No reading queued</strong><p>The latest report did not include a reading recommendation.</p></div></div>';$("readingCount").textContent=`${done} complete`;$("learnProgress").style.width=arr.length?`${done/arr.length*100}%`:'0%'}
+  async function deleteSnapshot(generatedAt){
+    const snaps=vault?.snaps||[],snap=snaps.find(s=>s.generated_at===generatedAt);
+    if(!snap)return;
+    const label=`${dateShort(snap.report_date)} at ${new Date(snap.generated_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+    if(snaps.length===1&&!confirm("This is the only snapshot. Deleting it will leave History empty, but your encrypted vault and device sync key will remain. Continue?"))return;
+    if(!confirm(`Delete the ${label} snapshot? This cannot be undone unless you restore an encrypted backup.`))return;
+    vault.snaps=snaps.filter(s=>s.generated_at!==generatedAt);
+    await save();
+    render();
+    $("privacyMsg").textContent=`Deleted the ${label} snapshot. Vault and sync pairing were preserved.`;
+  }
+  function renderHistory(){const arr=[...(vault?.snaps||[])].sort((a,b)=>new Date(b.generated_at)-new Date(a.generated_at));$("historyCount").textContent=String(arr.length);$("historyList").textContent="";arr.slice(0,30).forEach(s=>{const el=document.createElement('div');el.className='history-item';el.innerHTML=`<div class="history-date"><strong>${escapeText(dateShort(s.report_date))}</strong><small>${new Date(s.generated_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</small></div><div class="history-main"><strong>${money(s.metrics?.known_financial_assets)}</strong><br><small>Cash ${money(s.metrics?.liquid_cash)}</small></div><div class="history-status ${s.status}">${s.status}</div>`;const del=document.createElement('button');del.type='button';del.className='history-delete';del.textContent='Delete';del.setAttribute('aria-label',`Delete ${dateShort(s.report_date)} snapshot`);del.addEventListener('click',()=>deleteSnapshot(s.generated_at).catch(()=>{$("privacyMsg").textContent="Could not delete snapshot."}));el.appendChild(del);$("historyList").appendChild(el)});if(!arr.length)$("historyList").innerHTML='<div class="history-item history-empty"><div class="history-main"><strong>No snapshots yet</strong><br><small>Automatic sync will add them here.</small></div></div>'}
+  function render(){const s=latest();renderStatus(s);renderMetrics(s);renderActions(s);renderLiquidity(s);renderSpend(s);renderPortfolio(s);renderRetirement(s);renderReading(s?.readings||[]);renderHistory();renderTrend();renderSyncUI()}
+  function canonicalJwk(j){return JSON.stringify({e:j.e,kty:j.kty,n:j.n})}
+  async function kidFor(j){const h=await crypto.subtle.digest("SHA-256",TE.encode(canonicalJwk(j)));return b64u(h).slice(0,22)}
+  async function enableSync(){if(vault.sync?.private_jwk)return;$("syncMsg").textContent="Generating device key…";const pair=await crypto.subtle.generateKey({name:"RSA-OAEP",modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:"SHA-256"},true,["encrypt","decrypt"]),pub=await crypto.subtle.exportKey("jwk",pair.publicKey),priv=await crypto.subtle.exportKey("jwk",pair.privateKey),kid=await kidFor(pub);vault.sync={public_jwk:{e:pub.e,kty:pub.kty,n:pub.n},private_jwk:priv,kid,last_sync:null};await save();renderSyncUI();$("syncMsg").textContent="Device key created. Copy the Sync Code and send it to ChatGPT once."}
+  function syncCode(){const j=vault?.sync?.public_jwk;if(!j)return null;return"FC1."+b64u(TE.encode(canonicalJwk(j)))}
+  function renderSyncUI(){const s=vault?.sync,state=$("syncState");if(!s){state.textContent="Not paired";state.className='pill warn';show($("enableSync"));hide($("copyCode"));hide($("syncNow"));setHeaderSync('Local','');return}hide($("enableSync"));show($("copyCode"));show($("syncNow"));if(s.last_sync){state.textContent="Paired";state.className='pill good';$("syncDetail").textContent=`Last successful encrypted sync: ${new Date(s.last_sync).toLocaleString()}`;setHeaderSync('Synced','good')}else{state.textContent="Key ready";state.className='pill warn';$("syncDetail").textContent=`Key ID ${s.kid}. Send the Sync Code to ChatGPT to pair this device.`;setHeaderSync('Pair','warn')}}
+  async function decryptEnvelope(env){
+    if(!vault?.sync?.private_jwk)throw Error("Automatic sync is not enabled on this device.");
+    if(!env||typeof env!=="object")throw Error("Encrypted feed is not a JSON envelope.");
+    if(env.version!=="1.0")throw Error("Unsupported encrypted-feed version.");
+    if(env.kid!==vault.sync.kid)throw Error("Feed is encrypted for a previous device key. Copy the current Sync Code and send it to ChatGPT to re-pair.");
+    let priv,raw,aes,plain;
+    try{
+      const jwk={...vault.sync.private_jwk};
+      delete jwk.alg; delete jwk.use; delete jwk.key_ops;
+      priv=await crypto.subtle.importKey("jwk",jwk,{name:"RSA-OAEP",hash:"SHA-256"},false,["decrypt"]);
+    }catch(e){throw Error(`Device key import failed${e?.name?` (${e.name})`:""}.`)}
+    try{raw=await crypto.subtle.decrypt({name:"RSA-OAEP"},priv,ub(env.wrapped_key))}catch(e){throw Error(`Report key unwrap failed${e?.name?` (${e.name})`:""}. The feed may not match this device key.`)}
+    if(raw.byteLength!==32)throw Error("Report key has an invalid length.");
+    try{aes=await crypto.subtle.importKey("raw",raw,{name:"AES-GCM"},false,["decrypt"])}catch(e){throw Error(`Report key import failed${e?.name?` (${e.name})`:""}.`)}
+    const iv=ub(env.iv),cipher=ub(env.ciphertext);
+    if(iv.byteLength!==12)throw Error("Encrypted feed IV has an invalid length.");
+    if(cipher.byteLength<17)throw Error("Encrypted feed ciphertext is too short.");
+    try{plain=await crypto.subtle.decrypt({name:"AES-GCM",iv,tagLength:128},aes,cipher)}catch(e){throw Error(`Report decryption failed${e?.name?` (${e.name})`:""}. The ciphertext or device key did not authenticate.`)}
+    try{return JSON.parse(TD.decode(plain))}catch(e){throw Error("Decrypted report is not valid JSON.")}
+  }
+  async function syncNow(silent=false){
+    if(!vault?.sync?.private_jwk){if(!silent)$("syncMsg").textContent="Enable automatic sync first.";return}
+    let stage="network";
+    try{
+      if(!silent)$("syncMsg").textContent="Checking encrypted feed…";
+      setHeaderSync('Syncing','warn');
+      const res=await fetch(FEED,{cache:"no-store",credentials:"omit",referrerPolicy:"no-referrer"});
+      if(!res.ok)throw Error(`Encrypted feed returned HTTP ${res.status}.`);
+      stage="envelope";
+      const text=await res.text();
+      let env; try{env=JSON.parse(text)}catch{throw Error("Encrypted feed returned invalid JSON.")}
+      stage="decrypt";
+      const snap=await decryptEnvelope(env);
+      stage="validate";
+      valid(snap);
+      const newest=latest();
+      if(!newest||new Date(snap.generated_at)>new Date(newest.generated_at)){stage="import";await importSnap(snap)}
+      stage="save";
+      vault.sync.last_sync=new Date().toISOString();await save();
+      stage="render";
+      render();
+      if(!silent)$("syncMsg").textContent="Encrypted feed loaded and decrypted locally.";
+    }catch(e){
+      setHeaderSync('Attention','bad');$("syncState").textContent="Needs attention";$("syncState").className='pill bad';
+      const detail=e?.message||e?.name||"Unknown error";
+      $("syncMsg").textContent=`Sync failed during ${stage}: ${detail}`;
     }
   }
-
-  const RAW_FEED = "https://raw.githubusercontent.com/zander123abc/nn-zero-to-hero/financial-command-feed/financial-command/latest.enc.json";
-  const LOCAL_FEED = "/nn-zero-to-hero/financial-command/latest.enc.json";
-  const nativeFetch = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    try {
-      const url = typeof input === "string" ? input : input?.url;
-      if (url === RAW_FEED || (typeof url === "string" && url.startsWith(RAW_FEED + "?"))) {
-        return nativeFetch(`${LOCAL_FEED}?v=${Date.now()}`, {
-          ...(init || {}),
-          cache: "no-store",
-          credentials: "same-origin",
-          referrerPolicy: "no-referrer"
-        });
-      }
-    } catch (_) {}
-    return nativeFetch(input, init);
-  };
-
-  const stamp = Date.now();
-  const css = document.querySelector('link[rel="stylesheet"]');
-  if (css) css.href = `/nn-zero-to-hero/financial-command-app/styles.css?v=${stamp}`;
-
-  const script = document.createElement("script");
-  script.src = `/nn-zero-to-hero/financial-command-app/app.js?v=${stamp}`;
-  script.async = false;
-  script.onerror = () => {
-    document.body.innerHTML = '<main style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;padding:24px"><h1>Financial Command</h1><p>App code failed to load. Reload this page once while connected to the internet.</p></main>';
-  };
-  document.body.appendChild(script);
+  function startAuto(){if(syncTimer)clearInterval(syncTimer);syncTimer=setInterval(()=>{if(document.visibilityState==='visible')syncNow(true)},300000);setTimeout(()=>syncNow(true),700)}
+  function download(name,obj){const u=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:"application/json"})),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),500)}
+  async function loadVersion(){
+    try{
+      const res=await fetch("./version.json",{cache:"no-store",credentials:"same-origin"});
+      if(!res.ok)throw Error("Version metadata unavailable.");
+      const meta=await res.json();
+      $("appVersion").textContent=meta?.version?`v${meta.version}`:"Unknown";
+      $("appBuild").textContent=meta?.build||"Unknown";
+    }catch{
+      $("appVersion").textContent="Unknown";
+      $("appBuild").textContent="Unavailable";
+    }
+  }
+  $("setupForm").addEventListener('submit',async e=>{e.preventDefault();const a=$("p1").value,b=$("p2").value;if(a.length<10)return $("setupMsg").textContent="Use at least 10 characters.";if(a!==b)return $("setupMsg").textContent="Passphrases do not match.";await create(a);$("p1").value=$("p2").value='';hide($("setup"));show($("app"));show($("tabBar"));show($("lock"));render();setTab(vault.ui?.tab||'overview',false);startAuto()});
+  $("unlockForm").addEventListener('submit',async e=>{e.preventDefault();try{await openVault($("up").value);$("up").value='';hide($("unlock"));show($("app"));show($("tabBar"));show($("lock"));render();setTab(vault.ui?.tab||'overview',false);startAuto()}catch{$("unlockMsg").textContent="Unable to decrypt. Check the passphrase."}});
+  $("lock").addEventListener('click',lock);
+  $("enableSync").addEventListener('click',()=>enableSync().catch(()=>$("syncMsg").textContent="Could not generate a device key."));
+  $("copyCode").addEventListener('click',async()=>{const c=syncCode();if(!c)return;try{await navigator.clipboard.writeText(c);$("syncMsg").textContent="Sync Code copied."}catch{$("syncMsg").textContent="Copy failed. Select and copy: "+c}});
+  $("syncNow").addEventListener('click',()=>syncNow(false));
+  $("import").addEventListener('click',async()=>{try{const s=await importSnap(JSON.parse(extract($("json").value)));$("json").value='';$("importMsg").textContent=`Imported ${s.report_date}. Encrypted locally.`}catch(e){$("importMsg").textContent=e.message}});
+  $("export").addEventListener('click',()=>{const r=record();if(r){download(`financial-command-encrypted-backup-${new Date().toISOString().slice(0,10)}.json`,r);$("privacyMsg").textContent="Encrypted backup exported."}});
+  async function restoreEncryptedBackup(e,messageEl){const f=e.target.files?.[0];if(!f)return;try{const r=JSON.parse(await f.text());if(!r||!r.s||!r.iv||!r.c)throw Error("Invalid backup.");localStorage.setItem(STORE,JSON.stringify(r));messageEl.textContent="Encrypted backup restored. Reloading…";setTimeout(()=>location.reload(),400)}catch(err){messageEl.textContent=err.message||"Invalid encrypted backup."}finally{e.target.value=""}}
+  $("restoreBackup").addEventListener('change',e=>restoreEncryptedBackup(e,$("privacyMsg")));
+  $("restoreBackupSetup").addEventListener('change',e=>restoreEncryptedBackup(e,$("setupMsg")));
+  $("wipe").addEventListener('click',()=>{if(confirm("Permanently delete the encrypted local vault and device sync key?")){localStorage.removeItem(STORE);key=vault=null;location.reload()}});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&vault)syncNow(true)},{passive:true});
+  function applySystemTheme(){const dark=matchMedia('(prefers-color-scheme: dark)').matches;$("themeColor").setAttribute('content',dark?'#000000':'#f2f2f7');document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]').setAttribute('content',dark?'black-translucent':'default')}
+  const mq=matchMedia('(prefers-color-scheme: dark)');applySystemTheme();mq.addEventListener?.('change',applySystemTheme);
+  if(!crypto?.subtle){document.body.textContent="This browser does not support the required local encryption.";return}
+  loadVersion();
+  record()?show($("unlock")):show($("setup"));
+  if('serviceWorker'in navigator&&location.protocol==='https:'){
+    let reloading=false;
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloading)return;reloading=true;location.reload()});
+    navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(reg=>{
+      const check=()=>reg.update().catch(()=>{});check();window.addEventListener('focus',check);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')check()},{passive:true});setInterval(check,15*60*1000);if(reg.waiting)reg.waiting.postMessage('SKIP_WAITING');reg.addEventListener('updatefound',()=>{const w=reg.installing;if(!w)return;w.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller)w.postMessage('SKIP_WAITING')})})
+    }).catch(()=>{});
+  }
 })();

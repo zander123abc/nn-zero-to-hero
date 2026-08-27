@@ -39,6 +39,7 @@
           <label>Passphrase<input id="p1" type="password" minlength="10" autocomplete="new-password" required></label>
           <label>Confirm passphrase<input id="p2" type="password" minlength="10" autocomplete="new-password" required></label>
           <button class="primary-button" type="submit">Create vault</button>
+          <label class="file-button">Restore encrypted backup<input id="restoreBackupSetup" type="file" accept="application/json,.json"></label>
           <p id="setupMsg" class="form-message" aria-live="polite"></p>
         </form>
       </section>
@@ -187,10 +188,11 @@
           </section>
 
           <section class="section-block">
-            <div class="section-header"><div><span class="section-label">App</span><h2>Privacy & updates</h2></div><span class="pill">v5.0.0</span></div>
+            <div class="section-header"><div><span class="section-label">App</span><h2>Privacy & updates</h2></div><span id="appVersion" class="pill">Loading…</span></div>
             <div class="settings-list">
               <div><span>Appearance</span><strong>Follows iPhone system</strong></div>
               <div><span>App updates</span><strong>Automatic in place</strong></div>
+              <div><span>Build</span><strong id="appBuild">—</strong></div>
               <div><span>Financial storage</span><strong>Encrypted locally</strong></div>
               <div><span>Network access</span><strong>App + encrypted feed only</strong></div>
             </div>
