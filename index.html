@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#f2f2f7" id="themeColor">
+  <meta name="referrer" content="no-referrer">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="FinCommand">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; frame-src 'none'; worker-src 'self'; manifest-src 'self'">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <title>Financial Command</title>
+</head>
+<body>
+  <div id="shell">
+    <header class="app-header">
+      <div>
+        <div class="app-kicker">Financial Command</div>
+        <h1 id="pageTitle">Overview</h1>
+      </div>
+      <div class="header-actions">
+        <span id="headerSync" class="sync-indicator" aria-label="Sync status"><span class="sync-dot"></span><span class="sync-label">Local</span></span>
+        <button id="lock" class="icon-button hidden" type="button" aria-label="Lock vault" title="Lock">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3m-11 0h12a1 1 0 0 1 1 1v9H5v-9a1 1 0 0 1 1-1Z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="content">
+      <section id="setup" class="auth-card hidden">
+        <div class="auth-mark">FC</div>
+        <h2>Create private vault</h2>
+        <p>Financial snapshots and the device sync key are encrypted in this browser. Your passphrase is never stored.</p>
+        <form id="setupForm" class="form-stack">
+          <label>Passphrase<input id="p1" type="password" minlength="10" autocomplete="new-password" required></label>
+          <label>Confirm passphrase<input id="p2" type="password" minlength="10" autocomplete="new-password" required></label>
+          <button class="primary-button" type="submit">Create vault</button>
+          <p id="setupMsg" class="form-message" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section id="unlock" class="auth-card hidden">
+        <div class="auth-mark">FC</div>
+        <h2>Unlock Financial Command</h2>
+        <p>Decryption happens on this device.</p>
+        <form id="unlockForm" class="form-stack">
+          <label>Passphrase<input id="up" type="password" autocomplete="current-password" required></label>
+          <button class="primary-button" type="submit">Unlock</button>
+          <p id="unlockMsg" class="form-message" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <div id="app" class="hidden">
+        <section class="tab-view active" data-view="overview" aria-labelledby="tab-overview">
+          <div class="status-card">
+            <div class="status-topline">
+              <div class="status-badge"><span id="statusDot" class="status-dot"></span><span id="statusText">NO DATA</span></div>
+              <div class="asof"><span id="reportDate">—</span><small id="freshness">No report yet</small></div>
+            </div>
+            <p id="bottomLine" class="status-summary">Automatic encrypted sync is available after pairing.</p>
+            <div id="qualityFlags" class="quality-row"></div>
+          </div>
+
+          <div class="metric-strip" role="list">
+            <article role="listitem"><span>Known assets</span><strong id="knownAssets">—</strong><small id="assetDelta">—</small></article>
+            <article role="listitem"><span>Invested</span><strong id="investedAssets">—</strong><small>tracked capital</small></article>
+            <article role="listitem"><span>Liquid cash</span><strong id="liquidCash">—</strong><small id="cashCoverage">—</small></article>
+          </div>
+
+          <section class="section-block">
+            <div class="section-header">
+              <div><span class="section-label">Trend</span><h2>Balance history</h2></div>
+              <div class="segmented" id="trendControl" role="tablist" aria-label="Trend metric">
+                <button class="segment active" data-trend="assets" type="button">Assets</button>
+                <button class="segment" data-trend="cash" type="button">Cash</button>
+              </div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-head"><strong id="trendValue">—</strong><span id="trendChange">No history</span></div>
+              <svg id="trendChart" class="line-chart" viewBox="0 0 600 190" preserveAspectRatio="none" role="img" aria-label="Financial trend chart"></svg>
+              <div id="trendDates" class="chart-axis"><span>—</span><span>—</span></div>
+            </div>
+          </section>
+
+          <section class="section-block">
+            <div class="section-header"><div><span class="section-label">Today</span><h2>Decision queue</h2></div></div>
+            <div class="decision-list">
+              <article class="decision primary-decision"><span class="decision-index">01</span><div><small>Highest value</small><p id="highestAction">—</p></div></article>
+              <article class="decision"><span class="decision-index">02</span><div><small>Core action</small><p id="coreAction">—</p></div></article>
+              <article class="decision"><span class="decision-index">03</span><div><small>Speculative</small><p id="specAction">—</p></div></article>
+            </div>
+          </section>
+
+          <section class="section-block">
+            <div class="section-header"><div><span class="section-label">Liquidity</span><h2>Emergency runway</h2></div><span id="liquidityGate" class="pill">Unknown</span></div>
+            <div class="runway-card">
+              <div class="ring-wrap">
+                <svg class="progress-ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-track" cx="60" cy="60" r="50"/><circle id="efRing" class="ring-value" cx="60" cy="60" r="50"/></svg>
+                <div class="ring-label"><strong id="efPct">—</strong><span>funded</span></div>
+              </div>
+              <div class="runway-copy"><span>Emergency fund</span><strong id="efText">—</strong><div class="runway-row"><span>Immediate cash</span><b id="availableCash">—</b></div><div class="runway-row"><span>Near-term obligations</span><b id="obligations">—</b></div></div>
+            </div>
+          </section>
+        </section>
+
+        <section class="tab-view" data-view="cashflow" aria-labelledby="tab-cashflow">
+          <section class="section-block first-block">
+            <div class="section-header"><div><span class="section-label">This month</span><h2>Spending</h2></div><span id="spendVerdict" class="pill">—</span></div>
+            <div class="big-number"><strong id="spendMtd">—</strong><span>reconciled economic spending</span></div>
+            <div class="comparison-bars" id="spendBars"></div>
+          </section>
+
+          <section class="section-block">
+            <div class="section-header"><div><span class="section-label">Behavior</span><h2>Signals</h2></div></div>
+            <div id="spendObservations" class="signal-list"></div>
+          </section>
+
+          <section class="section-block">
+            <div class="section-header"><div><span class="section-label">Cash controls</span><h2>Obligations & debt</h2></div></div>
+            <div class="detail-grid">
+              <article><span>Raw linked spend</span><strong id="spendRaw">—</strong></article>
+              <article><span>3-mo average</span><strong id="spendAvg">—</strong></article>
+              <article><span>Marketplace</span><strong id="marketplace">—</strong></article>
+              <article><span>Revolving cards</span><strong id="revolving">—</strong></article>
+              <article><span>Highest purchase APR</span><strong id="highestApr">—</strong></article>
+              <article><span>Near-term obligations</span><strong id="obligations2">—</strong></article>
+            </div>
+          </section>
+        </section>
+
+        <section class="tab-view" data-view="portfolio" aria-labelledby="tab-portfolio">
+          <section class="section-block first-block">
+            <div class="section-header"><div><span class="section-label">Allocation</span><h2>Portfolio map</h2></div><span id="specBadge" class="pill">—</span></div>
+            <div class="portfolio-layout">
+              <div class="donut-wrap"><div id="portfolioDonut" class="donut"><div><strong id="portfolioTotal">—</strong><span>invested</span></div></div></div>
+              <div id="portfolioLegend" class="legend"></div>
+            </div>
+          </section>
+
+          <section class="section-block">
+            <div class="section-header"><div><span class="section-label">Risk budget</span><h2>Concentration</h2></div></div>
+            <div id="riskBars" class="risk-bars"></div>
+          </section>
+
+          <section class="section-block">
+            <div class="section-header"><div><span class="section-label">Retirement</span><h2>Contribution controls</h2></div></div>
+            <div class="retirement-card">
+              <div class="retire-row"><span>TSP balance</span><strong id="tspBalance">—</strong></div>
+              <div class="retire-row"><span>Roth TSP election</span><strong id="rothTspPct">—</strong></div>
+              <div class="progress-row"><div><span>TSP employee YTD</span><strong id="tspProgressText">—</strong></div><div class="mini-track"><div id="tspBar" class="mini-fill"></div></div></div>
+              <div class="progress-row"><div><span>IRA YTD</span><strong id="iraProgressText">—</strong></div><div class="mini-track"><div id="iraBar" class="mini-fill secondary"></div></div></div>
+              <div class="target-mix"><span>TSP target</span><strong id="tspMix">—</strong></div>
+            </div>
+          </section>
+        </section>
+
+        <section class="tab-view" data-view="learn" aria-labelledby="tab-learn">
+          <section class="section-block first-block">
+            <div class="section-header"><div><span class="section-label">Build your edge</span><h2>Reading queue</h2></div><span id="readingCount" class="pill">0 complete</span></div>
+            <div class="learn-progress"><div id="learnProgress" class="learn-progress-fill"></div></div>
+            <div id="readingList" class="reading-list"></div>
+          </section>
+        </section>
+
+        <section class="tab-view" data-view="settings" aria-labelledby="tab-settings">
+          <section class="section-block first-block">
+            <div class="section-header"><div><span class="section-label">Automatic sync</span><h2>Encrypted feed</h2></div><span id="syncState" class="pill">Not paired</span></div>
+            <p id="syncDetail" class="settings-copy">Generate a device key, then send the public Sync Code to ChatGPT. The private key stays encrypted in this vault.</p>
+            <div class="button-row"><button id="enableSync" class="primary-button" type="button">Enable sync</button><button id="copyCode" class="secondary-button hidden" type="button">Copy Sync Code</button><button id="syncNow" class="secondary-button hidden" type="button">Sync now</button></div>
+            <p id="syncMsg" class="form-message" aria-live="polite"></p>
+          </section>
+
+          <section class="section-block">
+            <details class="settings-details">
+              <summary><span><small>Fallback</small>Manual report import</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></summary>
+              <div class="details-body"><textarea id="json" rows="7" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder='{"schema_version":"1.0", ...}'></textarea><button id="import" class="primary-button" type="button">Validate & import</button><p id="importMsg" class="form-message"></p></div>
+            </details>
+          </section>
+
+          <section class="section-block">
+            <div class="section-header"><div><span class="section-label">History</span><h2>Snapshots</h2></div><span id="historyCount" class="pill">0</span></div>
+            <div id="historyList" class="history-list"></div>
+          </section>
+
+          <section class="section-block">
+            <div class="section-header"><div><span class="section-label">App</span><h2>Privacy & updates</h2></div><span class="pill">v5.0.0</span></div>
+            <div class="settings-list">
+              <div><span>Appearance</span><strong>Follows iPhone system</strong></div>
+              <div><span>App updates</span><strong>Automatic in place</strong></div>
+              <div><span>Financial storage</span><strong>Encrypted locally</strong></div>
+              <div><span>Network access</span><strong>App + encrypted feed only</strong></div>
+            </div>
+            <div class="button-row"><button id="export" class="secondary-button" type="button">Export encrypted backup</button><label class="file-button">Restore encrypted backup<input id="restoreBackup" type="file" accept="application/json,.json"></label><button id="wipe" class="destructive-button" type="button">Wipe local vault</button></div>
+            <p id="privacyMsg" class="form-message"></p>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <nav id="tabBar" class="tab-bar hidden" aria-label="Primary navigation">
+      <button id="tab-overview" class="tab-button active" data-tab="overview" type="button" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"/></svg><span>Overview</span></button>
+      <button id="tab-cashflow" class="tab-button" data-tab="cashflow" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m5 9V5m5 13v-6m5 6V3"/></svg><span>Cashflow</span></button>
+      <button id="tab-portfolio" class="tab-button" data-tab="portfolio" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9A9 9 0 1 1 12 3Zm3 0a6 6 0 0 1 6 6h-6V3Z"/></svg><span>Portfolio</span></button>
+      <button id="tab-learn" class="tab-button" data-tab="learn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H11v17H7.5A3.5 3.5 0 0 0 4 22V5.5Zm16 0A3.5 3.5 0 0 0 16.5 2H13v17h3.5A3.5 3.5 0 0 1 20 22V5.5Z"/></svg><span>Learn</span></button>
+      <button id="tab-settings" class="tab-button" data-tab="settings" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5ZM19.4 15a1.8 1.8 0 0 0 .36 2l.06.06-2.76 2.76-.06-.06a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.1 1.65V21H10v-.09A1.8 1.8 0 0 0 8.9 19.3a1.8 1.8 0 0 0-2 .36l-.06.06-2.76-2.76.06-.06a1.8 1.8 0 0 0 .36-2 1.8 1.8 0 0 0-1.65-1.1H2V10h.85A1.8 1.8 0 0 0 4.5 8.9a1.8 1.8 0 0 0-.36-2l-.06-.06 2.76-2.76.06.06a1.8 1.8 0 0 0 2 .36A1.8 1.8 0 0 0 10 2.85V2h4v.85a1.8 1.8 0 0 0 1.1 1.65 1.8 1.8 0 0 0 2-.36l.06-.06 2.76 2.76-.06.06a1.8 1.8 0 0 0-.36 2A1.8 1.8 0 0 0 21.15 10H22v4h-.85A1.8 1.8 0 0 0 19.4 15Z"/></svg><span>Settings</span></button>
+    </nav>
+  </div>
+  <script src="app.js" defer></script>
+</body>
+</html>
