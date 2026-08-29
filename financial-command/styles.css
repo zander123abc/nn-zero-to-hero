@@ -169,4 +169,5 @@ textarea { resize: vertical; min-height: 145px; font-family: ui-monospace,SFMono
 .goal-editor { margin-top:9px; }
 .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .provenance,.data-warning { color:var(--muted); font-size:11px; line-height:1.45; margin:0 2px 9px; }
+.portfolio-mode { display:flex; flex-wrap:wrap; gap:6px; margin:0 2px 7px; }
 @media (max-width:390px) { .protect-grid { grid-template-columns:1fr; } }
