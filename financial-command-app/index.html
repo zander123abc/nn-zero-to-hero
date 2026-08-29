@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="FinCommand">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; frame-src 'none'; worker-src 'self'; manifest-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; frame-src 'none'; worker-src 'self'; manifest-src 'self'">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg">
   <link rel="stylesheet" href="styles.css">
@@ -20,7 +20,7 @@
     <header class="app-header">
       <div>
         <div class="app-kicker">Financial Command</div>
-        <h1 id="pageTitle">Overview</h1>
+        <h1 id="pageTitle">Command</h1>
       </div>
       <div class="header-actions">
         <span id="headerSync" class="sync-indicator" aria-label="Sync status"><span class="sync-dot"></span><span class="sync-label">Local</span></span>
@@ -39,6 +39,7 @@
           <label>Passphrase<input id="p1" type="password" minlength="10" autocomplete="new-password" required></label>
           <label>Confirm passphrase<input id="p2" type="password" minlength="10" autocomplete="new-password" required></label>
           <button class="primary-button" type="submit">Create vault</button>
+          <label class="file-button">Restore encrypted backup<input id="restoreBackupSetup" type="file" accept="application/json,.json"></label>
           <p id="setupMsg" class="form-message" aria-live="polite"></p>
         </form>
       </section>
@@ -56,7 +57,7 @@
 
       <div id="app" class="hidden">
         <section class="tab-view active" data-view="overview" aria-labelledby="tab-overview">
-          <div class="status-card">
+          <div class="status-card" role="status" aria-live="polite">
             <div class="status-topline">
               <div class="status-badge"><span id="statusDot" class="status-dot"></span><span id="statusText">NO DATA</span></div>
               <div class="asof"><span id="reportDate">—</span><small id="freshness">No report yet</small></div>
@@ -81,7 +82,7 @@
             </div>
             <div class="chart-card">
               <div class="chart-head"><strong id="trendValue">—</strong><span id="trendChange">No history</span></div>
-              <svg id="trendChart" class="line-chart" viewBox="0 0 600 190" preserveAspectRatio="none" role="img" aria-label="Financial trend chart"></svg>
+              <svg id="trendChart" class="line-chart" viewBox="0 0 600 190" preserveAspectRatio="none" role="img" aria-label="Financial trend chart. Current value and change are provided in text above."></svg>
               <div id="trendDates" class="chart-axis"><span>—</span><span>—</span></div>
             </div>
           </section>
@@ -109,6 +110,18 @@
 
         <section class="tab-view" data-view="cashflow" aria-labelledby="tab-cashflow">
           <section class="section-block first-block">
+            <div class="section-header"><div><span class="section-label">Protect first</span><h2>Cash required now</h2></div></div>
+            <div class="protect-grid" role="list"><article role="listitem"><span>Spendable now</span><strong id="protectCash">—</strong></article><article role="listitem"><span>Near-term required</span><strong id="protectDue">—</strong></article><article class="priority-gap" role="listitem"><span>Funding gap</span><strong id="protectGap">—</strong></article></div>
+          </section>
+
+          <section class="section-block">
+            <div class="section-header"><div><span class="section-label">Fund next</span><h2>Goal pipeline</h2></div><span id="monthlyGoalLoad" class="pill">Needs goal pacing</span></div>
+            <div id="goalConflict" class="signal WATCH">Goal capacity needs reliable income and target dates.</div>
+            <div id="goalList" class="goal-list"></div>
+            <details class="settings-details goal-editor"><summary><span><small>Private planning</small>Add a future goal</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></summary><form id="goalForm" class="details-body goal-form"><label>Goal name<input id="goalName" maxlength="60" required></label><div class="form-grid"><label>Target amount<input id="goalTarget" type="number" min="1" step="1" inputmode="decimal" required></label><label>Already saved<input id="goalCurrent" type="number" min="0" step="1" inputmode="decimal"></label></div><div class="form-grid"><label>Monthly plan<input id="goalMonthly" type="number" min="0" step="1" inputmode="decimal"></label><label>Target date<input id="goalDate" type="date"></label></div><label>Horizon<select id="goalHorizon"><option>Now</option><option>Next</option><option>Later</option><option>Long term</option></select></label><button class="primary-button" type="submit">Save goal locally</button><p id="goalMsg" class="form-message" aria-live="polite"></p></form></details>
+          </section>
+
+          <section class="section-block first-block">
             <div class="section-header"><div><span class="section-label">This month</span><h2>Spending</h2></div><span id="spendVerdict" class="pill">—</span></div>
             <div class="big-number"><strong id="spendMtd">—</strong><span>reconciled economic spending</span></div>
             <div class="comparison-bars" id="spendBars"></div>
@@ -135,6 +148,8 @@
         <section class="tab-view" data-view="portfolio" aria-labelledby="tab-portfolio">
           <section class="section-block first-block">
             <div class="section-header"><div><span class="section-label">Allocation</span><h2>Portfolio map</h2></div><span id="specBadge" class="pill">—</span></div>
+            <div class="portfolio-mode" aria-label="Portfolio data views"><span class="pill good">Integrated planning · active</span><span class="pill">Verified linked · unavailable in feed</span></div>
+            <p id="portfolioSource" class="provenance">Integrated planning allocation · source pending</p>
             <div class="portfolio-layout">
               <div class="donut-wrap"><div id="portfolioDonut" class="donut"><div><strong id="portfolioTotal">—</strong><span>invested</span></div></div></div>
               <div id="portfolioLegend" class="legend"></div>
@@ -187,10 +202,11 @@
           </section>
 
           <section class="section-block">
-            <div class="section-header"><div><span class="section-label">App</span><h2>Privacy & updates</h2></div><span class="pill">v5.0.0</span></div>
+            <div class="section-header"><div><span class="section-label">App</span><h2>Privacy & updates</h2></div><span id="appVersion" class="pill">Loading…</span></div>
             <div class="settings-list">
               <div><span>Appearance</span><strong>Follows iPhone system</strong></div>
               <div><span>App updates</span><strong>Automatic in place</strong></div>
+              <div><span>Build</span><strong id="appBuild">—</strong></div>
               <div><span>Financial storage</span><strong>Encrypted locally</strong></div>
               <div><span>Network access</span><strong>App + encrypted feed only</strong></div>
             </div>
@@ -202,11 +218,11 @@
     </main>
 
     <nav id="tabBar" class="tab-bar hidden" aria-label="Primary navigation">
-      <button id="tab-overview" class="tab-button active" data-tab="overview" type="button" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"/></svg><span>Overview</span></button>
-      <button id="tab-cashflow" class="tab-button" data-tab="cashflow" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m5 9V5m5 13v-6m5 6V3"/></svg><span>Cashflow</span></button>
-      <button id="tab-portfolio" class="tab-button" data-tab="portfolio" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9A9 9 0 1 1 12 3Zm3 0a6 6 0 0 1 6 6h-6V3Z"/></svg><span>Portfolio</span></button>
+      <button id="tab-overview" class="tab-button active" data-tab="overview" type="button" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"/></svg><span>Command</span></button>
+      <button id="tab-cashflow" class="tab-button" data-tab="cashflow" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m5 9V5m5 13v-6m5 6V3"/></svg><span>Plan</span></button>
+      <button id="tab-portfolio" class="tab-button" data-tab="portfolio" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9A9 9 0 1 1 12 3Zm3 0a6 6 0 0 1 6 6h-6V3Z"/></svg><span>Invest</span></button>
       <button id="tab-learn" class="tab-button" data-tab="learn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H11v17H7.5A3.5 3.5 0 0 0 4 22V5.5Zm16 0A3.5 3.5 0 0 0 16.5 2H13v17h3.5A3.5 3.5 0 0 1 20 22V5.5Z"/></svg><span>Learn</span></button>
-      <button id="tab-settings" class="tab-button" data-tab="settings" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5ZM19.4 15a1.8 1.8 0 0 0 .36 2l.06.06-2.76 2.76-.06-.06a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.1 1.65V21H10v-.09A1.8 1.8 0 0 0 8.9 19.3a1.8 1.8 0 0 0-2 .36l-.06.06-2.76-2.76.06-.06a1.8 1.8 0 0 0 .36-2 1.8 1.8 0 0 0-1.65-1.1H2V10h.85A1.8 1.8 0 0 0 4.5 8.9a1.8 1.8 0 0 0-.36-2l-.06-.06 2.76-2.76.06.06a1.8 1.8 0 0 0 2 .36A1.8 1.8 0 0 0 10 2.85V2h4v.85a1.8 1.8 0 0 0 1.1 1.65 1.8 1.8 0 0 0 2-.36l.06-.06 2.76 2.76-.06.06a1.8 1.8 0 0 0-.36 2A1.8 1.8 0 0 0 21.15 10H22v4h-.85A1.8 1.8 0 0 0 19.4 15Z"/></svg><span>Settings</span></button>
+      <button id="tab-settings" class="tab-button" data-tab="settings" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5ZM19.4 15a1.8 1.8 0 0 0 .36 2l.06.06-2.76 2.76-.06-.06a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.1 1.65V21H10v-.09A1.8 1.8 0 0 0 8.9 19.3a1.8 1.8 0 0 0-2 .36l-.06.06-2.76-2.76.06-.06a1.8 1.8 0 0 0 .36-2 1.8 1.8 0 0 0-1.65-1.1H2V10h.85A1.8 1.8 0 0 0 4.5 8.9a1.8 1.8 0 0 0-.36-2l-.06-.06 2.76-2.76.06.06a1.8 1.8 0 0 0 2 .36A1.8 1.8 0 0 0 10 2.85V2h4v.85a1.8 1.8 0 0 0 1.1 1.65 1.8 1.8 0 0 0 2-.36l.06-.06 2.76 2.76-.06.06a1.8 1.8 0 0 0-.36 2A1.8 1.8 0 0 0 21.15 10H22v4h-.85A1.8 1.8 0 0 0 19.4 15Z"/></svg><span>More</span></button>
     </nav>
   </div>
   <script src="app.js" defer></script>
