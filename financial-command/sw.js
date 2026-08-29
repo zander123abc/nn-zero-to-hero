@@ -1,4 +1,4 @@
-const CACHE="fc-auto-v6",ASSETS=["./","./index.html","./styles.css","./app.js","./manifest.webmanifest","./icon.svg","./version.json"];
+const CACHE="fc-auto-v7",ASSETS=["./","./index.html","./styles.css","./app.js","./manifest.webmanifest","./icon.svg","./version.json"];
 self.addEventListener("install",event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)));self.skipWaiting()});
 self.addEventListener("activate",event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))));self.clients.claim()});
 self.addEventListener("message",event=>{if(event.data==="SKIP_WAITING")self.skipWaiting()});
